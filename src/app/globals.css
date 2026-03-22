@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-roboto-mono);
+}
+
+@layer base {
+  body {
+    background-color: #0F172A; /* Antrasit koyu lacivert */
+    color: #F8FAFC;
+    overscroll-behavior: none; /* Pull-to-refresh engelle */
+    -webkit-tap-highlight-color: transparent;
+  }
+}
