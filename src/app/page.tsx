@@ -10,6 +10,7 @@ export default function PanicButtonPage() {
 
   useEffect(() => {
     const checkCooldown = () => {
+      /* TEST SÜRÜMÜ: COOLDOWN İPTAL EDİLDİ
       const lastSosTime = localStorage.getItem("last_sos_time");
       if (lastSosTime) {
         const elapsed = Date.now() - parseInt(lastSosTime);
@@ -18,6 +19,7 @@ export default function PanicButtonPage() {
           setCooldownLeft(Math.floor((cooldown - elapsed) / 1000));
         }
       }
+      */
     };
     checkCooldown();
     const interval = setInterval(() => {
@@ -80,8 +82,9 @@ export default function PanicButtonPage() {
 
         if (isEmergency) {
           setStatus("SENT_RED");
-          localStorage.setItem("last_sos_time", Date.now().toString());
-          setCooldownLeft(5 * 60);
+          // TEST SÜRÜMÜ: COOLDOWN İPTAL EDİLDİ
+          // localStorage.setItem("last_sos_time", Date.now().toString());
+          // setCooldownLeft(5 * 60);
         } else {
           setStatus("SENT_GREEN");
         }
