@@ -19,10 +19,9 @@ export async function POST(req: Request) {
     // Sinyali cihaza en yakın noktada Redis Queue'ya at
     await redis.lpush("telsiz72:sos_queue", JSON.stringify(finalPayload));
 
-    // Zero-latency response
     return NextResponse.json({ success: true, message: "Signal received by Edge." });
-  } catch (error) {
+  } catch (error: any) {
     console.error("SOS Ingestion Error", error);
-    return NextResponse.json({ error: "Edge function failed" }, { status: 500 });
+    return NextResponse.json({ error: error?.message || "Edge function failed", details: error }, { status: 500 });
   }
 }
