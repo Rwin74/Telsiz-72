@@ -1,21 +1,38 @@
-const CACHE_NAME = 'telsiz-72-cache-v1';
+const CACHE_NAME = 'telsiz-ui-v1';
 const SOS_QUEUE_STORE = 'sos-queue';
 const DB_NAME = 'telsiz-72-db';
+const OFFLINE_URLS = ['/', '/manifest.json'];
 
 self.addEventListener('install', (event) => {
-  self.skipWaiting();
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll(OFFLINE_URLS);
+    }).then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames.map((cacheName) => {
+          if (cacheName !== CACHE_NAME) {
+            return caches.delete(cacheName);
+          }
+        })
+      );
+    }).then(() => self.clients.claim())
+  );
 });
 
 self.addEventListener('fetch', (event) => {
-  if (event.request.url.includes('/api/sos') && event.request.method === 'POST') {
+  const { request } = event;
+
+  if (request.url.includes('/api/sos') && request.method === 'POST') {
     event.respondWith(
-      fetch(event.request.clone()).catch(async (error) => {
+      fetch(request.clone()).catch(async (error) => {
         // Network failed or offline - save to IndexedDB
-        const requestClone = event.request.clone();
+        const requestClone = request.clone();
         const payload = await requestClone.json();
         await saveToIndexedDB(payload);
         
@@ -30,6 +47,34 @@ self.addEventListener('fetch', (event) => {
           headers: { 'Content-Type': 'application/json' },
           status: 200
         });
+      })
+    );
+    return;
+  }
+
+  // UI Pre-caching Strategy: Stale-While-Revalidate
+  if (request.method === 'GET' && !request.url.includes('/api/')) {
+    event.respondWith(
+      caches.match(request).then((cachedResponse) => {
+        const fetchPromise = fetch(request).then((networkResponse) => {
+          // Cache successful responses
+          if (networkResponse && networkResponse.status === 200) {
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(request, responseToCache);
+            });
+          }
+          return networkResponse;
+        }).catch((err) => {
+          // Fallback to offline shell if it's a page navigation
+          if (request.mode === 'navigate') {
+            return caches.match('/');
+          }
+          throw err;
+        });
+        
+        // Return 0.1s cached response instantly, while silently updating cache in background
+        return cachedResponse || fetchPromise;
       })
     );
   }
