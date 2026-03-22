@@ -1,5 +1,5 @@
 import { useEffect, useRef, Fragment } from "react";
-import { MapContainer, TileLayer, CircleMarker, Popup, Circle } from "react-leaflet";
+import { MapContainer, TileLayer, CircleMarker, Popup, Circle, GeoJSON } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 
 // Fix Leaflet icons issue in Next.js dynamically
@@ -57,22 +57,27 @@ const HeatmapLayer = ({ data }: { data: Signal[] }) => {
 };
 
 // Map Navigation Controller
-const MapController = ({ flyTo }: { flyTo: any }) => {
+const MapController = ({ flyToProvince }: { flyToProvince: any }) => {
   const map = (require("react-leaflet") as any).useMap();
   useEffect(() => {
-    if (flyTo && flyTo.lat && flyTo.lng) {
-      map.flyTo([flyTo.lat, flyTo.lng], flyTo.zoom || 10, { animate: true, duration: 1.5 });
-    } else if (flyTo && flyTo.isBlind) {
-      // Just stay or zoom out
-      map.flyTo([38.9637, 35.2433], 5, { animate: true, duration: 1.5 });
+    if (flyToProvince) {
+      if (flyToProvince.value === "BLIND_SIGNALS") {
+         map.flyTo([38.9637, 35.2433], 5, { animate: true, duration: 1.5 });
+      } else if (flyToProvince.feature) {
+         try {
+           const L = require("leaflet");
+           const bounds = L.geoJSON(flyToProvince.feature).getBounds();
+           map.fitBounds(bounds, { padding: [20, 20], animate: true, duration: 1.5 });
+         } catch(e) {}
+      }
     } else {
       map.flyTo([38.9637, 35.2433], 6, { animate: true, duration: 1.5 });
     }
-  }, [flyTo, map]);
+  }, [flyToProvince, map]);
   return null;
 };
 
-export default function CrisisMap({ signals, flyTo }: { signals: Signal[], flyTo?: any }) {
+export default function CrisisMap({ signals, flyToProvince, geoJson, onProvinceSelect }: { signals: Signal[], flyToProvince?: any, geoJson?: any, onProvinceSelect?: (name: string) => void }) {
   const defaultCenter: [number, number] = [38.9637, 35.2433];
   
   const resolveCase = async (id: string | undefined) => {
@@ -107,7 +112,33 @@ export default function CrisisMap({ signals, flyTo }: { signals: Signal[], flyTo
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
         />
 
-        <MapController flyTo={flyTo} />
+        <MapController flyToProvince={flyToProvince} />
+        
+        {geoJson && (
+          <GeoJSON 
+            data={geoJson}
+            key={flyToProvince?.value || 'all'}
+            style={(feature: any) => {
+              const isSelected = flyToProvince && flyToProvince.value === feature.properties.name;
+              return {
+                color: isSelected ? '#FF0000' : '#475569',
+                weight: isSelected ? 3 : 1,
+                fillColor: isSelected ? '#FF0000' : 'transparent',
+                fillOpacity: isSelected ? 0.15 : 0,
+              };
+            }}
+            onEachFeature={(feature: any, layer: any) => {
+              layer.on({
+                click: () => {
+                  if (onProvinceSelect) {
+                    onProvinceSelect(feature.properties.name);
+                  }
+                }
+              });
+            }}
+          />
+        )}
+
         <HeatmapLayer data={signals} />
 
         {signals.map((signal, idx) => {

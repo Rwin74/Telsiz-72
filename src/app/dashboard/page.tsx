@@ -5,8 +5,11 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/clients";
 import { ShieldCheck, AlertOctagon, Activity, CheckCircle2 } from "lucide-react";
 
+import Select from "react-select";
+import bbox from "@turf/bbox";
+
 // React-Leaflet MUST be loaded dynamically with SSR disabled
-const CrisisMap = dynamic<{ signals: Signal[], flyTo?: any }>(() => import("../../components/CrisisMap"), {
+const CrisisMap = dynamic<{ signals: Signal[], flyToProvince?: any, geoJson?: any, onProvinceSelect?: (name: string) => void }>(() => import("../../components/CrisisMap"), {
   ssr: false,
   loading: () => (
     <div className="flex-1 w-full bg-[#0F172A] flex items-center justify-center">
@@ -14,19 +17,6 @@ const CrisisMap = dynamic<{ signals: Signal[], flyTo?: any }>(() => import("../.
     </div>
   ),
 });
-
-const REGIONS = [
-  { name: "📍 Konumu Bilinmeyenler (Kör Sinyaller)", isBlind: true },
-  { name: "İstanbul", lat: 41.0082, lng: 28.9784, zoom: 10 },
-  { name: "Ankara", lat: 39.9334, lng: 32.8597, zoom: 10 },
-  { name: "İzmir", lat: 38.4192, lng: 27.1287, zoom: 10 },
-  { name: "Hatay", lat: 36.2023, lng: 36.1613, zoom: 10 },
-  { name: "Kahramanmaraş", lat: 37.5753, lng: 36.9228, zoom: 10 },
-  { name: "Adıyaman", lat: 37.7644, lng: 38.2763, zoom: 10 },
-  { name: "Gaziantep", lat: 37.0662, lng: 37.3833, zoom: 10 },
-  { name: "Malatya", lat: 38.3552, lng: 38.3095, zoom: 10 },
-  { name: "Adana", lat: 37.0000, lng: 35.3213, zoom: 10 }
-];
 
 type Signal = {
   id: string;
@@ -48,10 +38,16 @@ export default function DashboardPage() {
   const [signals, setSignals] = useState<Signal[]>([]);
   const [stats, setStats] = useState({ totalSos: 0, totalSafe: 0, totalResolved: 0 });
   const [filter, setFilter] = useState<"ALL" | "RED_ONLY">("ALL");
-  const [selectedRegion, setSelectedRegion] = useState<typeof REGIONS[0] | null>(null);
+  const [geoJson, setGeoJson] = useState<any>(null);
+  const [selectedProvince, setSelectedProvince] = useState<any>(null);
   const [recoveredIds, setRecoveredIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
+    // Load GeoJSON
+    fetch("/turkey-provinces.json")
+      .then(res => res.json())
+      .then(data => setGeoJson(data))
+      .catch(err => console.error("Error loading geojson", err));
     // Initial Fetch (limit to recent 5000 for performance on load)
     const fetchInitial = async () => {
       const { data, error } = await supabase
@@ -137,19 +133,41 @@ export default function DashboardPage() {
   const displayedSignals = signals.filter(s => {
     if (filter === "RED_ONLY" && s.status !== 1) return false;
     
-    // Geo-Fencing Filter
-    if (selectedRegion) {
-      if (selectedRegion.isBlind) {
+    // Geo-Fencing Filter logic by Bounding Box
+    if (selectedProvince) {
+      if (selectedProvince.value === "BLIND_SIGNALS") {
         return s.lat === 0 && s.lng === 0;
-      } else if (selectedRegion.lat && selectedRegion.lng) {
-        // approx 50-60km radius
-        const latDiff = Math.abs(s.lat - selectedRegion.lat);
-        const lngDiff = Math.abs(s.lng - selectedRegion.lng);
-        if (latDiff > 0.6 || lngDiff > 0.6) return false;
+      }
+      if (selectedProvince.feature) {
+        const [minLng, minLat, maxLng, maxLat] = bbox(selectedProvince.feature);
+        if (s.lat < minLat || s.lat > maxLat || s.lng < minLng || s.lng > maxLng) {
+          return false;
+        }
       }
     }
     return true;
   });
+
+  const sortedFeatures = geoJson ? [...geoJson.features].sort((a,b) => a.properties.name.localeCompare(b.properties.name)) : [];
+  const selectOptions = [
+    { value: "ALL", label: "🌍 Tüm Türkiye (Harita)", feature: null },
+    { value: "BLIND_SIGNALS", label: "📍 Konumu Bilinmeyenler (Kör Sinyaller)", feature: null },
+    ...sortedFeatures.map(f => ({ value: f.properties.name, label: f.properties.name, feature: f }))
+  ];
+
+  const customStyles = {
+    control: (base: any, state: any) => ({ ...base, backgroundColor: '#1E293B', borderColor: state.isFocused ? '#3B82F6' : '#334155', color: '#f1f5f9', boxShadow: 'none' }),
+    menu: (base: any) => ({ ...base, backgroundColor: '#1E293B', border: '1px solid #334155' }),
+    option: (base: any, state: any) => ({ ...base, backgroundColor: state.isFocused ? '#334155' : state.isSelected ? '#0F172A' : '#1E293B', color: '#f1f5f9', cursor: 'pointer' }),
+    singleValue: (base: any) => ({ ...base, color: '#f1f5f9' }),
+    input: (base: any) => ({...base, color: '#f1f5f9'}),
+    placeholder: (base: any) => ({...base, color: '#94A3B8'})
+  };
+
+  const handleMapProvinceSelect = (name: string) => {
+    const opt = selectOptions.find(o => o.value === name);
+    if (opt) setSelectedProvince(opt);
+  };
 
   const handleClearAll = async () => {
     if (confirm("DİKKAT! Tüm kriz verilerini veritabanından SİLMEK istediğine emin misin?")) {
@@ -222,19 +240,14 @@ export default function DashboardPage() {
           </button>
           <div className="w-full h-px bg-slate-700/50 my-1"></div>
           
-          <select 
-             onChange={(e) => {
-                const idx = parseInt(e.target.value);
-                if (idx === -1) setSelectedRegion(null);
-                else setSelectedRegion(REGIONS[idx]);
-             }}
-             className="px-4 py-2 text-sm font-bold bg-slate-800/80 border border-slate-700 text-slate-300 rounded-lg shadow-lg outline-none cursor-pointer focus:border-blue-500 transition-all backdrop-blur-md"
-          >
-             <option value="-1">🌍 Tüm Türkiye (Harita)</option>
-             {REGIONS.map((r, i) => (
-                <option key={r.name} value={i}>{r.name}</option>
-             ))}
-          </select>
+          <Select
+             options={selectOptions}
+             value={selectedProvince || selectOptions[0]}
+             onChange={(val) => setSelectedProvince(val)}
+             styles={customStyles}
+             placeholder="İl Ara / Seç..."
+             className="w-full text-sm font-bold shadow-lg"
+          />
 
           <div className="w-full h-px bg-slate-700/50 my-1"></div>
 
@@ -247,7 +260,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Map Component */}
-        <CrisisMap signals={displayedSignals} flyTo={selectedRegion} />
+        <CrisisMap signals={displayedSignals} flyToProvince={selectedProvince} geoJson={geoJson} onProvinceSelect={handleMapProvinceSelect} />
       </main>
 
       {/* 20% Sidebar: Multi-purpose Signal List Area */}
