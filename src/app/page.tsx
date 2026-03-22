@@ -35,72 +35,91 @@ export default function PanicButtonPage() {
   };
 
   const sendSignal = async (isEmergency: boolean) => {
-    if (cooldownLeft > 0) return;
+    // if (cooldownLeft > 0) return;
 
     setStatus("LOCATING");
     setErrorMsg("");
 
-    if (!navigator.geolocation) {
-      setErrorMsg("GPS desteklenmiyor.");
-      setStatus("ERROR");
-      return;
-    }
+    let lat = 0, lng = 0, accuracy = -1;
 
-    const getPosition = (options: PositionOptions): Promise<GeolocationPosition> => {
-      return new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, options);
-      });
-    };
-
-    try {
-      let position: GeolocationPosition;
-      try {
-        // Plan A (Kesin Konum)
-        position = await getPosition({ enableHighAccuracy: true, timeout: 5000, maximumAge: 0 });
-      } catch (err) {
-        // Plan B (Ağ tabanlı Yaklaşık Konum - GPS Fallback)
-        position = await getPosition({ enableHighAccuracy: false, timeout: 10000, maximumAge: 0 });
-      }
-
-      setStatus("SENDING");
-      const lat = parseFloat(position.coords.latitude.toFixed(5));
-      const lng = parseFloat(position.coords.longitude.toFixed(5));
-      const accuracy = Math.round(position.coords.accuracy);
-      const s = isEmergency ? 1 : 0; // 1: SOS (Kırmızı), 0: SAFE (Yeşil)
-
-      // Payload'a a eklendi
-      const payload = { l: lat, g: lng, s, a: accuracy };
-
-      try {
-        const res = await fetch("/api/sos", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+    if (navigator.geolocation) {
+      const getPosition = (options: PositionOptions): Promise<GeolocationPosition> => {
+        return new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, options);
         });
+      };
 
-        if (!res.ok) throw new Error("Ağ hatası");
-
-        if (isEmergency) {
-          setStatus("SENT_RED");
-          // TEST SÜRÜMÜ: COOLDOWN İPTAL EDİLDİ
-          // localStorage.setItem("last_sos_time", Date.now().toString());
-          // setCooldownLeft(5 * 60);
-        } else {
-          setStatus("SENT_GREEN");
+      try {
+        let position: GeolocationPosition;
+        try {
+          // Plan A (Kesin Konum) timeout: 5000
+          position = await getPosition({ enableHighAccuracy: true, timeout: 5000, maximumAge: 0 });
+        } catch (err) {
+          // Plan B (Ağ tabanlı Yaklaşık Konum) timeout: 2000 (To max out at 7s total)
+          position = await getPosition({ enableHighAccuracy: false, timeout: 2000, maximumAge: 0 });
         }
 
-        setTimeout(() => setStatus("IDLE"), 5000);
+        lat = parseFloat(position.coords.latitude.toFixed(5));
+        lng = parseFloat(position.coords.longitude.toFixed(5));
+        accuracy = Math.round(position.coords.accuracy);
+
+        // Save last known location for severe GPS blackouts
+        localStorage.setItem("last_known_lat", lat.toString());
+        localStorage.setItem("last_known_lng", lng.toString());
       } catch (err) {
-        console.error(err);
-        setErrorMsg("Sinyal gönderilemedi, baştan deneyin.");
-        setStatus("ERROR");
-        setTimeout(() => setStatus("IDLE"), 4000);
+        // Plan C: FATAL GPS ERROR (No-Matter-What Protocol)
+        const lastLat = localStorage.getItem("last_known_lat");
+        const lastLng = localStorage.getItem("last_known_lng");
+        if (lastLat && lastLng) {
+          lat = parseFloat(lastLat);
+          lng = parseFloat(lastLng);
+          accuracy = 9999; // Represents historical fallback
+        }
       }
+    } else {
+      // GPS not supported at all
+      const lastLat = localStorage.getItem("last_known_lat");
+      const lastLng = localStorage.getItem("last_known_lng");
+      if (lastLat && lastLng) {
+        lat = parseFloat(lastLat);
+        lng = parseFloat(lastLng);
+        accuracy = 9999;
+      }
+    }
+
+    // GUARANTEED EXECUTION:
+    setStatus("SENDING");
+    const s = isEmergency ? 1 : 0; // 1: SOS (Kırmızı), 0: SAFE (Yeşil)
+    const payload = { l: lat, g: lng, s, a: accuracy };
+
+    try {
+      const res = await fetch("/api/sos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) throw new Error("Ağ hatası");
+
+      if (isEmergency) {
+        setStatus("SENT_RED");
+        // TEST SÜRÜMÜ: COOLDOWN İPTAL EDİLDİ
+        // localStorage.setItem("last_sos_time", Date.now().toString());
+        // setCooldownLeft(5 * 60);
+      } else {
+        setStatus("SENT_GREEN");
+      }
+
+      if (accuracy === 9999 || accuracy === -1) {
+        setErrorMsg("Konum bulunamadı, ama sinyal hafızaya kilitlendi!");
+      }
+
+      setTimeout(() => { setStatus("IDLE"); setErrorMsg(""); }, 5000);
     } catch (err) {
       console.error(err);
-      setErrorMsg("Konum alınamadı. Lütfen GPS izni verin.");
+      setErrorMsg("Sinyal gönderilemedi, baştan deneyin.");
       setStatus("ERROR");
-      setTimeout(() => setStatus("IDLE"), 4000);
+      setTimeout(() => { setStatus("IDLE"); setErrorMsg(""); }, 4000);
     }
   };
 
@@ -151,8 +170,8 @@ export default function PanicButtonPage() {
           {(status === "LOCATING" || status === "SENDING") && <Loader2 size={16} className="animate-spin" />}
           {status === "LOCATING" && "GPS Aranıyor..."}
           {status === "SENDING" && "Sinyal İletiliyor..."}
-          {status === "SENT_RED" && "YARDIM SİNYALİ İLETİLDİ."}
-          {status === "SENT_GREEN" && "GÜVENDE SİNYALİ İLETİLDİ."}
+          {status === "SENT_RED" && (errorMsg || "YARDIM SİNYALİ İLETİLDİ.")}
+          {status === "SENT_GREEN" && (errorMsg || "GÜVENDE SİNYALİ İLETİLDİ.")}
           {status === "ERROR" && errorMsg}
         </div>
       )}
