@@ -30,19 +30,20 @@ export async function GET() {
     const mappedInserts = items.map((i: any) => {
       const obj = typeof i === "string" ? JSON.parse(i) : i;
       return {
+        id: obj.id,
         lat: obj.l,
         lng: obj.g,
-        status: obj.s,
+        status: obj.s !== undefined ? obj.s : 1, // Fallback status if missing (e.g., from a patch)
         accuracy: obj.a || null,
         created_at: obj.created_at || new Date().toISOString(),
         payload_size: obj.payload_size || 15
       };
     });
 
-    // Supabase Bulk Insert
+    // Supabase Bulk Upsert
     let { error, count } = await supabase
       .from("searches")
-      .insert(mappedInserts);
+      .upsert(mappedInserts, { onConflict: "id" });
 
     if (error && error.message?.includes("accuracy")) {
       console.warn("Supabase schema missing 'accuracy' column. Retrying without it...");
@@ -50,7 +51,7 @@ export async function GET() {
         const { accuracy, ...rest } = item;
         return rest;
       });
-      const retryResult = await supabase.from("searches").insert(fallbackInserts);
+      const retryResult = await supabase.from("searches").upsert(fallbackInserts, { onConflict: "id" });
       error = retryResult.error;
       count = retryResult.count;
     }

@@ -56,8 +56,23 @@ const HeatmapLayer = ({ data }: { data: Signal[] }) => {
   return null;
 };
 
+// Map Navigation Controller
+const MapController = ({ flyTo }: { flyTo: any }) => {
+  const map = (require("react-leaflet") as any).useMap();
+  useEffect(() => {
+    if (flyTo && flyTo.lat && flyTo.lng) {
+      map.flyTo([flyTo.lat, flyTo.lng], flyTo.zoom || 10, { animate: true, duration: 1.5 });
+    } else if (flyTo && flyTo.isBlind) {
+      // Just stay or zoom out
+      map.flyTo([38.9637, 35.2433], 5, { animate: true, duration: 1.5 });
+    } else {
+      map.flyTo([38.9637, 35.2433], 6, { animate: true, duration: 1.5 });
+    }
+  }, [flyTo, map]);
+  return null;
+};
 
-export default function CrisisMap({ signals }: { signals: Signal[] }) {
+export default function CrisisMap({ signals, flyTo }: { signals: Signal[], flyTo?: any }) {
   const defaultCenter: [number, number] = [38.9637, 35.2433];
   
   const resolveCase = async (id: string | undefined) => {
@@ -92,6 +107,7 @@ export default function CrisisMap({ signals }: { signals: Signal[] }) {
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
         />
 
+        <MapController flyTo={flyTo} />
         <HeatmapLayer data={signals} />
 
         {signals.map((signal, idx) => {

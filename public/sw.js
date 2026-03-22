@@ -53,7 +53,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   // UI Pre-caching Strategy: Stale-While-Revalidate
-  if (request.method === 'GET' && !request.url.includes('/api/')) {
+  if (request.method === 'GET' && !request.url.includes('/api/') && request.url.startsWith('http')) {
     event.respondWith(
       caches.match(request).then((cachedResponse) => {
         const fetchPromise = fetch(request).then((networkResponse) => {
@@ -61,7 +61,9 @@ self.addEventListener('fetch', (event) => {
           if (networkResponse && networkResponse.status === 200) {
             const responseToCache = networkResponse.clone();
             caches.open(CACHE_NAME).then((cache) => {
-              cache.put(request, responseToCache);
+              cache.put(request, responseToCache).catch(err => {
+                console.warn('Cache put warning:', err);
+              });
             });
           }
           return networkResponse;
@@ -73,7 +75,7 @@ self.addEventListener('fetch', (event) => {
           throw err;
         });
         
-        // Return 0.1s cached response instantly, while silently updating cache in background
+        // Return cached response instantly, while silently updating cache in background
         return cachedResponse || fetchPromise;
       })
     );

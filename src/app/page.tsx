@@ -1,23 +1,51 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ShieldCheck, AlertOctagon, Loader2 } from "lucide-react";
+import { ShieldCheck, AlertOctagon, Loader2, MapPin } from "lucide-react";
 
 export default function PanicButtonPage() {
   const [status, setStatus] = useState<"IDLE" | "LOCATING" | "SENDING" | "SENT_RED" | "SENT_GREEN" | "ERROR">("IDLE");
   const [errorMsg, setErrorMsg] = useState("");
   const [cooldownLeft, setCooldownLeft] = useState<number>(0);
+  const [permissionState, setPermissionState] = useState<PermissionState | "loading">("loading");
+
+  useEffect(() => {
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions.query({ name: "geolocation" as PermissionName }).then((result) => {
+        setPermissionState(result.state);
+        result.addEventListener('change', () => {
+          setPermissionState(result.state);
+        });
+      }).catch(() => {
+        setPermissionState("prompt");
+      });
+    } else {
+      setPermissionState("prompt");
+    }
+  }, []);
+
+  const requestPermission = () => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        () => {
+          setPermissionState("granted");
+        },
+        (err) => {
+          if (err.code === err.PERMISSION_DENIED) {
+            setPermissionState("denied");
+          }
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      );
+    }
+  };
 
   useEffect(() => {
     const checkCooldown = () => {
       /* TEST SÜRÜMÜ: COOLDOWN İPTAL EDİLDİ
       const lastSosTime = localStorage.getItem("last_sos_time");
       if (lastSosTime) {
-        const elapsed = Date.now() - parseInt(lastSosTime);
-        const cooldown = 5 * 60 * 1000; // 5 minutes
-        if (elapsed < cooldown) {
-          setCooldownLeft(Math.floor((cooldown - elapsed) / 1000));
-        }
+        ...
       }
       */
     };
@@ -26,6 +54,67 @@ export default function PanicButtonPage() {
       setCooldownLeft(prev => prev > 0 ? prev - 1 : 0);
     }, 1000);
     return () => clearInterval(interval);
+  }, []);
+
+  // Otonom Konum Düzeltme (Self-Correcting Payload)
+  useEffect(() => {
+    const handleOnlineRecovery = () => {
+      const isPending = localStorage.getItem("pending_blind_sos");
+      if (isPending !== "true") return;
+
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            const lat = parseFloat(position.coords.latitude.toFixed(5));
+            const lng = parseFloat(position.coords.longitude.toFixed(5));
+            const accuracy = Math.round(position.coords.accuracy);
+
+            try {
+              const activeSignalId = localStorage.getItem("active_signal_id");
+              if (!activeSignalId) return;
+
+              const recoveryPayload = {
+                id: activeSignalId,
+                l: lat,
+                g: lng,
+                a: accuracy,
+                is_recovery: true,
+                recovered_at: new Date().toISOString()
+              };
+
+              // Supabase / Backend için PATCH isteği
+              const response = await fetch("/api/sos", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(recoveryPayload),
+              });
+
+              if (response.ok) {
+                localStorage.setItem("pending_blind_sos", "false");
+                console.log("Otonom Kurtarma Başarılı: Kör veri ezildi!");
+              }
+            } catch (err) {
+              console.error("Kurtarma (Patch) hatası:", err);
+            }
+          },
+          (err) => {
+            console.error("Kurtarma konum hatası:", err);
+          },
+          { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 }
+        );
+      }
+    };
+
+    window.addEventListener("online", handleOnlineRecovery);
+    
+    // Eğer app açıldığında zaten online ise hemen kontrol et
+    if (typeof window !== "undefined" && navigator.onLine) {
+      handleOnlineRecovery();
+    }
+
+    return () => {
+      window.removeEventListener("online", handleOnlineRecovery);
+    };
   }, []);
 
   const formatTime = (seconds: number) => {
@@ -89,8 +178,18 @@ export default function PanicButtonPage() {
 
     // GUARANTEED EXECUTION:
     setStatus("SENDING");
+    
+    let activeSignalId = localStorage.getItem("active_signal_id");
+    if (isEmergency && !activeSignalId) {
+      activeSignalId = crypto.randomUUID();
+      localStorage.setItem("active_signal_id", activeSignalId);
+    } else if (!isEmergency) {
+      activeSignalId = crypto.randomUUID();
+      localStorage.removeItem("active_signal_id");
+    }
+
     const s = isEmergency ? 1 : 0; // 1: SOS (Kırmızı), 0: SAFE (Yeşil)
-    const payload = { l: lat, g: lng, s, a: accuracy };
+    const payload = { id: activeSignalId, l: lat, g: lng, s, a: accuracy };
 
     try {
       const res = await fetch("/api/sos", {
@@ -103,6 +202,15 @@ export default function PanicButtonPage() {
 
       if (isEmergency) {
         setStatus("SENT_RED");
+        
+        // Kör veri (Offline 0,0) durumu ise bayrakları kilitliyoruz.
+        if (accuracy === 9999 || accuracy === -1) {
+          localStorage.setItem("pending_blind_sos", "true");
+          localStorage.setItem("last_sos_time", Date.now().toString());
+        } else {
+          localStorage.setItem("pending_blind_sos", "false");
+        }
+        
         // TEST SÜRÜMÜ: COOLDOWN İPTAL EDİLDİ
         // localStorage.setItem("last_sos_time", Date.now().toString());
         // setCooldownLeft(5 * 60);
@@ -122,6 +230,50 @@ export default function PanicButtonPage() {
       setTimeout(() => { setStatus("IDLE"); setErrorMsg(""); }, 4000);
     }
   };
+
+  if (permissionState === "loading") {
+    return (
+      <main className="flex-1 flex flex-col justify-center items-center p-6 bg-[#0F172A] h-screen text-slate-400 gap-4">
+        <Loader2 className="animate-spin text-slate-500" size={48} />
+        <p className="font-mono text-sm tracking-widest uppercase">Sistem Hazırlanıyor...</p>
+      </main>
+    );
+  }
+
+  if (permissionState === "denied") {
+    return (
+      <main className="flex-1 flex flex-col justify-center items-center p-6 bg-red-600 h-screen text-white text-center">
+        <AlertOctagon size={100} className="mb-6 opacity-90 animate-pulse" />
+        <h1 className="text-4xl font-black mb-4 uppercase tracking-wider">DİKKAT!</h1>
+        <p className="text-xl font-bold max-w-md leading-relaxed">
+          Konum iznini reddettiniz. Sistem çalışamaz. <br/><br/> Lütfen tarayıcı ayarlarından izni manuel olarak açın.
+        </p>
+      </main>
+    );
+  }
+
+  if (permissionState === "prompt") {
+    return (
+      <main className="flex-1 flex flex-col justify-center items-center p-6 bg-[#0F172A] h-screen text-center">
+        <div className="bg-slate-800/80 p-8 rounded-[2rem] border border-slate-700 max-w-sm shadow-2xl flex flex-col items-center">
+          <div className="bg-blue-500/20 p-6 rounded-full border border-blue-500/30 mb-6">
+            <MapPin size={60} className="text-blue-400" />
+          </div>
+          <h1 className="text-white text-2xl font-black mb-4 uppercase tracking-wide">Sistem Kurulumu</h1>
+          <p className="text-slate-400 text-sm mb-8 leading-relaxed font-medium">
+            Acil durumlarda size ulaşabilmemiz için konum bilginize ihtiyacımız var. Panik anında zaman kaybetmemek için izni şimdi verin.
+          </p>
+          <button 
+            onClick={requestPermission}
+            className="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-black py-5 px-6 rounded-2xl transition-all shadow-lg active:scale-95 flex flex-col items-center justify-center gap-1 leading-tight"
+          >
+            <span>KONUM İZNİ VER VE</span>
+            <span>SİSTEMİ AKTİF ET</span>
+          </button>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="flex-1 flex flex-col justify-center items-center p-6 gap-8 relative overflow-hidden h-screen bg-[#0F172A]">

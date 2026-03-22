@@ -6,7 +6,7 @@ import { supabase } from "@/lib/clients";
 import { ShieldCheck, AlertOctagon, Activity, CheckCircle2 } from "lucide-react";
 
 // React-Leaflet MUST be loaded dynamically with SSR disabled
-const CrisisMap = dynamic<{ signals: Signal[] }>(() => import("../../components/CrisisMap"), {
+const CrisisMap = dynamic<{ signals: Signal[], flyTo?: any }>(() => import("../../components/CrisisMap"), {
   ssr: false,
   loading: () => (
     <div className="flex-1 w-full bg-[#0F172A] flex items-center justify-center">
@@ -14,6 +14,19 @@ const CrisisMap = dynamic<{ signals: Signal[] }>(() => import("../../components/
     </div>
   ),
 });
+
+const REGIONS = [
+  { name: "📍 Konumu Bilinmeyenler (Kör Sinyaller)", isBlind: true },
+  { name: "İstanbul", lat: 41.0082, lng: 28.9784, zoom: 10 },
+  { name: "Ankara", lat: 39.9334, lng: 32.8597, zoom: 10 },
+  { name: "İzmir", lat: 38.4192, lng: 27.1287, zoom: 10 },
+  { name: "Hatay", lat: 36.2023, lng: 36.1613, zoom: 10 },
+  { name: "Kahramanmaraş", lat: 37.5753, lng: 36.9228, zoom: 10 },
+  { name: "Adıyaman", lat: 37.7644, lng: 38.2763, zoom: 10 },
+  { name: "Gaziantep", lat: 37.0662, lng: 37.3833, zoom: 10 },
+  { name: "Malatya", lat: 38.3552, lng: 38.3095, zoom: 10 },
+  { name: "Adana", lat: 37.0000, lng: 35.3213, zoom: 10 }
+];
 
 type Signal = {
   id: string;
@@ -33,9 +46,10 @@ type LogEntry = {
 
 export default function DashboardPage() {
   const [signals, setSignals] = useState<Signal[]>([]);
-  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [stats, setStats] = useState({ totalSos: 0, totalSafe: 0, totalResolved: 0 });
   const [filter, setFilter] = useState<"ALL" | "RED_ONLY">("ALL");
+  const [selectedRegion, setSelectedRegion] = useState<typeof REGIONS[0] | null>(null);
+  const [recoveredIds, setRecoveredIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     // Initial Fetch (limit to recent 5000 for performance on load)
@@ -52,15 +66,6 @@ export default function DashboardPage() {
         const safe = data.filter((d) => d.status === 0).length;
         const resolved = data.filter((d) => d.status === 2).length;
         setStats({ totalSos: sos, totalSafe: safe, totalResolved: resolved });
-
-        const initialLogs: LogEntry[] = data.slice(0, 50).map((d) => ({
-          logId: d.id,
-          time: new Date(d.created_at).toLocaleTimeString('tr-TR'),
-          lat: d.lat,
-          lng: d.lng,
-          type: d.status === 1 ? "SOS" : d.status === 2 ? "RESOLVED" : "SAFE",
-        }));
-        setLogs(initialLogs);
       }
     };
 
@@ -83,36 +88,28 @@ export default function DashboardPage() {
               totalSafe: prev.totalSafe + (newSignal.status === 0 ? 1 : 0),
               totalResolved: prev.totalResolved + (newSignal.status === 2 ? 1 : 0),
             }));
-
-            const newLog: LogEntry = {
-              logId: newSignal.id + "_ins",
-              time: new Date(newSignal.created_at).toLocaleTimeString('tr-TR'),
-              lat: newSignal.lat,
-              lng: newSignal.lng,
-              type: newSignal.status === 1 ? "SOS" : newSignal.status === 2 ? "RESOLVED" : "SAFE"
-            };
-            setLogs((prev) => [newLog, ...prev]);
           } else if (payload.eventType === "UPDATE") {
              const updatedSignal = payload.new as Signal;
              
              setSignals((prev) => {
                const oldSignal = prev.find(s => s.id === updatedSignal.id);
-               if (oldSignal && oldSignal.status !== 2 && updatedSignal.status === 2) {
-                 // Case has been resolved
-                 setStats((statsPrev) => ({
-                   ...statsPrev,
-                   totalSos: Math.max(0, statsPrev.totalSos - 1),
-                   totalResolved: statsPrev.totalResolved + 1
-                 }));
-
-                 const newLog: LogEntry = {
-                   logId: updatedSignal.id + "_upd",
-                   time: new Date().toLocaleTimeString('tr-TR'),
-                   lat: updatedSignal.lat,
-                   lng: updatedSignal.lng,
-                   type: "RESOLVED"
-                 };
-                 setLogs((logsPrev) => [newLog, ...logsPrev]);
+               if (oldSignal) {
+                 if (oldSignal.status !== 2 && updatedSignal.status === 2) {
+                   // Case has been resolved
+                   setStats((statsPrev) => ({
+                     ...statsPrev,
+                     totalSos: Math.max(0, statsPrev.totalSos - 1),
+                     totalResolved: statsPrev.totalResolved + 1
+                   }));
+                 }
+                 // Handle Autonomous Location Recovery detection
+                 if (oldSignal.lat === 0 && updatedSignal.lat !== 0) {
+                    setRecoveredIds(set => {
+                       const next = new Set(set);
+                       next.add(updatedSignal.id);
+                       return next;
+                    });
+                 }
                }
                return prev.map(s => s.id === updatedSignal.id ? updatedSignal : s);
              });
@@ -137,7 +134,22 @@ export default function DashboardPage() {
     };
   }, []);
 
-  const displayedSignals = filter === "RED_ONLY" ? signals.filter((s) => s.status === 1) : signals;
+  const displayedSignals = signals.filter(s => {
+    if (filter === "RED_ONLY" && s.status !== 1) return false;
+    
+    // Geo-Fencing Filter
+    if (selectedRegion) {
+      if (selectedRegion.isBlind) {
+        return s.lat === 0 && s.lng === 0;
+      } else if (selectedRegion.lat && selectedRegion.lng) {
+        // approx 50-60km radius
+        const latDiff = Math.abs(s.lat - selectedRegion.lat);
+        const lngDiff = Math.abs(s.lng - selectedRegion.lng);
+        if (latDiff > 0.6 || lngDiff > 0.6) return false;
+      }
+    }
+    return true;
+  });
 
   const handleClearAll = async () => {
     if (confirm("DİKKAT! Tüm kriz verilerini veritabanından SİLMEK istediğine emin misin?")) {
@@ -149,7 +161,7 @@ export default function DashboardPage() {
       await supabase.from("searches").delete().neq("id", "00000000-0000-0000-0000-000000000000");
       
       setSignals([]);
-      setLogs([]);
+      setRecoveredIds(new Set());
       setStats({ totalSos: 0, totalSafe: 0, totalResolved: 0 });
     }
   };
@@ -209,6 +221,23 @@ export default function DashboardPage() {
             Sadece Acilleri Göster
           </button>
           <div className="w-full h-px bg-slate-700/50 my-1"></div>
+          
+          <select 
+             onChange={(e) => {
+                const idx = parseInt(e.target.value);
+                if (idx === -1) setSelectedRegion(null);
+                else setSelectedRegion(REGIONS[idx]);
+             }}
+             className="px-4 py-2 text-sm font-bold bg-slate-800/80 border border-slate-700 text-slate-300 rounded-lg shadow-lg outline-none cursor-pointer focus:border-blue-500 transition-all backdrop-blur-md"
+          >
+             <option value="-1">🌍 Tüm Türkiye (Harita)</option>
+             {REGIONS.map((r, i) => (
+                <option key={r.name} value={i}>{r.name}</option>
+             ))}
+          </select>
+
+          <div className="w-full h-px bg-slate-700/50 my-1"></div>
+
           <button
             onClick={handleClearAll}
             className={`px-4 py-2 text-xs font-bold border rounded-lg shadow-lg backdrop-blur-md transition-all bg-red-900/40 border-red-800/80 text-red-400 hover:bg-red-800/80 hover:text-white`}
@@ -218,33 +247,53 @@ export default function DashboardPage() {
         </div>
 
         {/* Map Component */}
-        <CrisisMap signals={displayedSignals} />
+        <CrisisMap signals={displayedSignals} flyTo={selectedRegion} />
       </main>
 
-      {/* 15% Sidebar: Matrix Log Area */}
-      <aside className="w-80 border-l border-slate-800 bg-[#0F172A] flex flex-col z-50">
+      {/* 20% Sidebar: Multi-purpose Signal List Area */}
+      <aside className="w-96 border-l border-slate-800 bg-[#0F172A] flex flex-col z-50 shadow-2xl">
         <div className="p-4 border-b border-slate-800 bg-slate-900/50">
-          <h2 className="text-xs font-bold text-slate-400 tracking-widest uppercase flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
-            Canlı Sinyal Akışı
+          <h2 className="text-xs font-bold text-slate-400 tracking-widest uppercase flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+              Filtrelenmiş Sinyaller {displayedSignals.length > 0 && `(${displayedSignals.length})`}
+            </div>
           </h2>
         </div>
         
-        <div className="flex-1 overflow-y-auto p-3 space-y-1 custom-scrollbar">
-          {logs.slice(0, 50).map((log) => (
+        <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
+          {displayedSignals.slice(0, 50).map((signal) => ( // only render top 50 in sidebar
             <div
-              key={log.logId}
-              className="text-[11px] font-mono leading-relaxed p-1.5 hover:bg-slate-800/50 rounded cursor-pointer transition-colors border border-transparent hover:border-slate-700/50"
+              key={signal.id}
+              className={`text-[11px] font-mono leading-relaxed p-2.5 bg-slate-800/20 hover:bg-slate-800/60 rounded-md cursor-pointer transition-all duration-500 border border-slate-700/30 hover:border-slate-600/50 ${signal.status === 2 ? 'opacity-40 grayscale' : ''}`}
             >
-              <span className="text-slate-500">[{log.time}]</span>{" "}
-              {log.type === "SOS" && (
-                <span className="text-red-400 font-bold">🔴 ACİL - KOORD: {log.lat.toFixed(4)}, {log.lng.toFixed(4)}</span>
-              )}
-              {log.type === "RESOLVED" && (
-                <span className="text-slate-300 font-bold">⚪ MÜDAHALE EDİLDİ - {log.lat.toFixed(4)}, {log.lng.toFixed(4)}</span>
-              )}
-              {log.type === "SAFE" && (
-                <span className="text-emerald-500/70">🟢 GÜVENDE - KOORD: {log.lat.toFixed(4)}, {log.lng.toFixed(4)}</span>
+              <div className="text-slate-500 mb-1 flex justify-between items-center">
+                 <span>ID: {signal.id?.substring(0, 8)}...</span>
+                 <span>{new Date(signal.created_at).toLocaleTimeString('tr-TR')}</span>
+              </div>
+              
+              {signal.status === 1 ? (
+                signal.lat === 0 && signal.lng === 0 ? (
+                  <div className="text-red-500 font-bold animate-pulse mt-1">
+                    🔴 ULAŞILAMIYOR<br/><span className="text-[10px] text-red-400/80">(Kör Sinyal - Otonom Güncelleme Bekleniyor)</span>
+                  </div>
+                ) : recoveredIds.has(signal.id) ? (
+                  <div className="text-emerald-400 font-bold animate-pulse mt-1">
+                    🟢 GÜNCEL KONUM ALINDI<br/><span className="text-[10px] text-emerald-500/80">Otonom Koordinat: {signal.lat.toFixed(4)}, {signal.lng.toFixed(4)}</span>
+                  </div>
+                ) : (
+                  <div className="text-red-400 font-bold mt-1">
+                    🔴 ACİL<br/><span className="text-[10px] text-red-300">KOORD: {signal.lat.toFixed(4)}, {signal.lng.toFixed(4)}</span>
+                  </div>
+                )
+              ) : signal.status === 2 ? (
+                <div className="text-slate-400 font-bold mt-1">
+                  ⚪ MÜDAHALE EDİLDİ<br/><span className="text-[10px] text-slate-500">{signal.lat.toFixed(4)}, {signal.lng.toFixed(4)}</span>
+                </div>
+              ) : (
+                <div className="text-emerald-500/90 font-bold mt-1">
+                  🟢 GÜVENDE<br/><span className="text-[10px] text-emerald-600/80">KOORD: {signal.lat.toFixed(4)}, {signal.lng.toFixed(4)}</span>
+                </div>
               )}
             </div>
           ))}
