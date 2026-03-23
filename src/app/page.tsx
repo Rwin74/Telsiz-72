@@ -3,8 +3,43 @@
 import { useState, useEffect } from "react";
 import { ShieldCheck, AlertOctagon, Loader2, MapPin } from "lucide-react";
 
+async function saveToIndexedDB(payload: any) {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('telsiz-72-db', 1);
+
+    request.onupgradeneeded = (e: any) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('sos-queue')) {
+        db.createObjectStore('sos-queue', { autoIncrement: true });
+      }
+    };
+
+    request.onsuccess = (e: any) => {
+      const db = e.target.result;
+      const transaction = db.transaction('sos-queue', 'readwrite');
+      const store = transaction.objectStore('sos-queue');
+      store.add(payload);
+      transaction.oncomplete = () => resolve(true);
+      transaction.onerror = () => reject(transaction.error);
+    };
+
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function registerSync() {
+  if (typeof window !== "undefined" && navigator.serviceWorker && (window as any).SyncManager) {
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      await (registration as any).sync.register('sync-sos');
+    } catch (err) {
+      console.error('Background Sync kaydı başarısız:', err);
+    }
+  }
+}
+
 export default function PanicButtonPage() {
-  const [status, setStatus] = useState<"IDLE" | "LOCATING" | "SENDING" | "SENT_RED" | "SENT_GREEN" | "ERROR">("IDLE");
+  const [status, setStatus] = useState<"IDLE" | "LOCATING" | "SENDING" | "SENT_RED" | "SENT_GREEN" | "ERROR" | "OFFLINE_SAVED">("IDLE");
   const [errorMsg, setErrorMsg] = useState("");
   const [cooldownLeft, setCooldownLeft] = useState<number>(0);
   const [permissionState, setPermissionState] = useState<PermissionState | "loading">("loading");
@@ -191,6 +226,33 @@ export default function PanicButtonPage() {
     const s = isEmergency ? 1 : 0; // 1: SOS (Kırmızı), 0: SAFE (Yeşil)
     const payload = { id: activeSignalId, l: lat, g: lng, s, a: accuracy };
 
+    const handleOfflineFallback = async () => {
+      try {
+        await saveToIndexedDB(payload);
+        await registerSync();
+        setStatus("OFFLINE_SAVED");
+        setErrorMsg("Sinyaliniz Hafızaya Alındı, Şebeke Bekleniyor... Lütfen ekranı kapatın.");
+        // Kör veri flag'leri
+        if (isEmergency) {
+          if (accuracy === 9999 || accuracy === -1) {
+            localStorage.setItem("pending_blind_sos", "true");
+            localStorage.setItem("last_sos_time", Date.now().toString());
+          } else {
+            localStorage.setItem("pending_blind_sos", "false");
+          }
+        }
+      } catch (dbErr) {
+        console.error("IndexedDB Kayıt Hatası:", dbErr);
+        setStatus("ERROR");
+        setErrorMsg("Kritik hata: Sinyal cihaz hafızasına yazılamadı!");
+        setTimeout(() => { setStatus("IDLE"); setErrorMsg(""); }, 4000);
+      }
+    };
+
+    // BAZI TELEFONLARDA (iOS/Safari vb.) navigator.onLine YANLIŞLIKLA FALSE DÖNEBİLİYOR.
+    // Bu yüzden direkt fetch atıyoruz. Gerçekten internet yoksa, fetch anında (0ms) "Failed to fetch" hatası fırlatacak
+    // ve zaten catch bloğuna düşerek handleOfflineFallback çalıştıracaktır.
+
     try {
       const res = await fetch("/api/sos", {
         method: "POST",
@@ -199,6 +261,18 @@ export default function PanicButtonPage() {
       });
 
       if (!res.ok) throw new Error("Ağ hatası");
+
+      // SW'nin offline olup background-sync için yakaladığını HTTP 200 { queued: true } dönmesinden anlıyoruz.
+      const clonedRes = res.clone();
+      try {
+        const data = await clonedRes.json();
+        if (data && data.queued) {
+          await handleOfflineFallback();
+          return;
+        }
+      } catch (e) {
+        // Not a JSON Object, safe to proceed
+      }
 
       if (isEmergency) {
         setStatus("SENT_RED");
@@ -211,9 +285,6 @@ export default function PanicButtonPage() {
           localStorage.setItem("pending_blind_sos", "false");
         }
         
-        // TEST SÜRÜMÜ: COOLDOWN İPTAL EDİLDİ
-        // localStorage.setItem("last_sos_time", Date.now().toString());
-        // setCooldownLeft(5 * 60);
       } else {
         setStatus("SENT_GREEN");
       }
@@ -225,9 +296,8 @@ export default function PanicButtonPage() {
       setTimeout(() => { setStatus("IDLE"); setErrorMsg(""); }, 5000);
     } catch (err) {
       console.error(err);
-      setErrorMsg("Sinyal gönderilemedi, baştan deneyin.");
-      setStatus("ERROR");
-      setTimeout(() => { setStatus("IDLE"); setErrorMsg(""); }, 4000);
+      // Ağ çökerse hata göstermeden sessizce hafızaya yaz ve yeşil ekran göster (Plan B)
+      await handleOfflineFallback();
     }
   };
 
@@ -316,7 +386,7 @@ export default function PanicButtonPage() {
       {(status !== "IDLE" || errorMsg) && (
         <div className={`absolute bottom-10 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full flex items-center gap-3 backdrop-blur-md font-mono font-bold text-sm min-w-max shadow-xl transition-all ${
           status === "ERROR" ? "bg-red-500/20 text-red-200 border border-red-500/50" : 
-          status === "SENT_RED" || status === "SENT_GREEN" ? "bg-emerald-500/20 text-emerald-200 border border-emerald-500/50" :
+          status === "SENT_RED" || status === "SENT_GREEN" || status === "OFFLINE_SAVED" ? "bg-emerald-500/20 text-emerald-200 border border-emerald-500/50" :
           "bg-white/10 text-slate-200 border border-white/20"
         }`}>
           {(status === "LOCATING" || status === "SENDING") && <Loader2 size={16} className="animate-spin" />}
@@ -324,6 +394,7 @@ export default function PanicButtonPage() {
           {status === "SENDING" && "Sinyal İletiliyor..."}
           {status === "SENT_RED" && (errorMsg || "YARDIM SİNYALİ İLETİLDİ.")}
           {status === "SENT_GREEN" && (errorMsg || "GÜVENDE SİNYALİ İLETİLDİ.")}
+          {status === "OFFLINE_SAVED" && errorMsg}
           {status === "ERROR" && errorMsg}
         </div>
       )}

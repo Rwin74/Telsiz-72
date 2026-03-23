@@ -25,29 +25,43 @@ export async function GET() {
       return NextResponse.json({ success: true, message: "No items pulled" });
     }
 
-    // Payload map for Supabase
-    // payload: { l: lat, g: lng, s: status, created_at: string, payload_size: number, a: number }
-    const mappedInserts = items.map((i: any) => {
-      const obj = typeof i === "string" ? JSON.parse(i) : i;
-      return {
-        id: obj.id,
-        lat: obj.l,
-        lng: obj.g,
-        status: obj.s !== undefined ? obj.s : 1, // Fallback status if missing (e.g., from a patch)
-        accuracy: obj.a || null,
-        created_at: obj.created_at || new Date().toISOString(),
-        payload_size: obj.payload_size || 15
-      };
+    const validItems: any[] = [];
+    const deadLetterItems: any[] = [];
+
+    items.forEach((i: any) => {
+      try {
+        const obj = typeof i === "string" ? JSON.parse(i) : i;
+        if (!obj.id) throw new Error("Missing ID");
+        validItems.push({
+          id: obj.id,
+          lat: obj.l !== undefined ? obj.l : 0,
+          lng: obj.g !== undefined ? obj.g : 0,
+          status: obj.s !== undefined ? obj.s : 1,
+          accuracy: obj.a || null,
+          created_at: obj.created_at || new Date().toISOString(),
+          payload_size: obj.payload_size || 15
+        });
+      } catch (e: any) {
+        deadLetterItems.push({ raw: i, error: e.message });
+      }
     });
+
+    if (deadLetterItems.length > 0) {
+      await redis.lpush("telsiz72:dead_letter_queue", JSON.stringify({ reason: "parse_error", items: deadLetterItems }));
+    }
+
+    if (validItems.length === 0) {
+      return NextResponse.json({ success: true, message: "No valid items to insert" });
+    }
 
     // Supabase Bulk Upsert
     let { error, count } = await supabase
       .from("searches")
-      .upsert(mappedInserts, { onConflict: "id" });
+      .upsert(validItems, { onConflict: "id" });
 
     if (error && error.message?.includes("accuracy")) {
       console.warn("Supabase schema missing 'accuracy' column. Retrying without it...");
-      const fallbackInserts = mappedInserts.map(item => {
+      const fallbackInserts = validItems.map(item => {
         const { accuracy, ...rest } = item;
         return rest;
       });
@@ -57,9 +71,9 @@ export async function GET() {
     }
 
     if (error) {
-      // Başarısız olursa Redis'e geri at (Dead Letter veya retry logic eklenebilir)
+      // Başarısız olursa Redis Dead Letter Queue içine yedekle ki veri tamamen YOK OLMASIN
       console.error("Supabase bulk insert error:", error);
-      // await redis.lpush(queueKey, ...items); // opsiyonel geri alma
+      await redis.lpush("telsiz72:dead_letter_queue", JSON.stringify({ reason: "supabase_error", error, items: validItems }));
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
