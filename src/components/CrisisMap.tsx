@@ -180,14 +180,14 @@ export default function CrisisMap({ signals, flyToProvince, geoJson, onProvinceS
                       
                       {/* DONANIM METRİKLERİ */}
                       <div className="telsiz-popup flex flex-col gap-1 border-t border-slate-700/50 pt-2 mt-1">
-                        <p className={`text-xs ${signal.battery !== undefined && signal.battery < 15 ? 'text-red-500 font-black animate-pulse' : 'text-emerald-400'}`}>
-                          🔋 Şarj: %{signal.battery !== undefined ? signal.battery : 'N/A'}{signal.battery !== undefined && signal.battery < 15 ? ' (KRİTİK)' : ' (NORMAL)'}
+                        <p className={`text-xs ${(signal.battery !== undefined && signal.battery !== null && signal.battery !== -1 && signal.battery < 15) ? 'text-red-500 font-black animate-pulse' : 'text-emerald-400'}`}>
+                          🔋 Şarj: {(signal.battery === undefined || signal.battery === null || signal.battery === -1) ? 'Sensör İzni Yok' : `%${signal.battery}${(signal.battery < 15) ? ' (KRİTİK)' : ' (NORMAL)'}`}
                         </p>
                         <p className="text-xs text-cyan-300">
-                          🫂 Kümelenme: {signal.ble_count !== undefined ? signal.ble_count : 0} Kişi Tespit
+                          🫂 Kümelenme: {(signal.ble_count === undefined || signal.ble_count === null || signal.ble_count === -1) ? 'Mobil Uygulama Gerektirir' : `${signal.ble_count} Kişi Tespit`}
                         </p>
                         <p className="text-xs text-amber-300">
-                          📏 Tahmini Derinlik: {signal.depth !== undefined ? signal.depth : 0} Metre
+                          📏 Tahmini Derinlik: {(signal.depth === undefined || signal.depth === null || signal.depth === -1) ? 'Mobil Uygulama Gerektirir' : `${signal.depth} Metre`}
                         </p>
                       </div>
 
