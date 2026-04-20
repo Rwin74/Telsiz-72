@@ -38,6 +38,9 @@ export async function GET() {
           lng: obj.g !== undefined ? obj.g : 0,
           status: obj.s !== undefined ? obj.s : 1,
           accuracy: obj.a || null,
+          battery: obj.b !== undefined ? obj.b : 100,
+          ble_count: obj.bc !== undefined ? obj.bc : 0,
+          depth: obj.d !== undefined ? obj.d : 0,
           created_at: obj.created_at || new Date().toISOString(),
           payload_size: obj.payload_size || 15
         });

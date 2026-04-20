@@ -8,9 +8,16 @@ export async function POST(req: Request) {
   try {
     const payload = await req.json();
 
-    // 15 Bayt Kuralı Validasyonu (Lat, Lng, Status, ID)
+    // 15 Bayt Kuralı Validasyonu (Lat, Lng, Status, ID) + Sensör Verileri (b, bc, d)
     if (!payload.id || typeof payload.l !== "number" || typeof payload.g !== "number" || typeof payload.s !== "number") {
       return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+    }
+    if (
+        (payload.b !== undefined && typeof payload.b !== "number") ||
+        (payload.bc !== undefined && typeof payload.bc !== "number") ||
+        (payload.d !== undefined && typeof payload.d !== "number")
+    ) {
+        return NextResponse.json({ error: "Invalid sensor payload" }, { status: 400 });
     }
 
     const byteSize = new Blob([JSON.stringify(payload)]).size;

@@ -16,22 +16,36 @@ CREATE TABLE IF NOT EXISTS public.searches (
 ALTER TABLE public.searches ENABLE ROW LEVEL SECURITY;
 
 -- Note: If these policies already exist, running them again might throw an error. 
--- You can safely ignore "policy already exists" errors or drop them first.
+-- We use DROP POLICY IF EXISTS to safely re-run this script.
+DROP POLICY IF EXISTS "Allow public inserts" ON public.searches;
 CREATE POLICY "Allow public inserts" ON public.searches
     FOR INSERT WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Allow public reads" ON public.searches;
 CREATE POLICY "Allow public reads" ON public.searches
     FOR SELECT USING (true);
 
 -- Phase 1.5 Requirement: Allow public updates to change status = 2
+DROP POLICY IF EXISTS "Allow public updates" ON public.searches;
 CREATE POLICY "Allow public updates" ON public.searches
     FOR UPDATE USING (true);
 
 -- Utility Requirement: Allow public deletes to clear the dashboard
+DROP POLICY IF EXISTS "Allow public deletes" ON public.searches;
 CREATE POLICY "Allow public deletes" ON public.searches
     FOR DELETE USING (true);
 
 
 -- 3. Enable Realtime on the table!
 -- This is critical for the Dashboard Socket to receive INSERT events
-alter publication supabase_realtime add table public.searches;
+DO $$ 
+BEGIN 
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.searches; 
+EXCEPTION WHEN OTHERS THEN 
+  raise notice 'Table might already be in publication'; 
+END $$;
+
+-- 4. Phase 2 Hardware Metrics (1-Byte compressable values)
+ALTER TABLE public.searches ADD COLUMN IF NOT EXISTS battery SMALLINT DEFAULT 100;
+ALTER TABLE public.searches ADD COLUMN IF NOT EXISTS ble_count SMALLINT DEFAULT 0;
+ALTER TABLE public.searches ADD COLUMN IF NOT EXISTS depth SMALLINT DEFAULT 0;

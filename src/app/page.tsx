@@ -214,6 +214,74 @@ export default function PanicButtonPage() {
     // GUARANTEED EXECUTION:
     setStatus("SENDING");
     
+    // DONANIM METRİKLERİNİ TOPLAMA SÜRECİ (Otonom Triyaj, BLE Kümelenme, Z-Ekseni Derinlik)
+    let bat = 100, bleCount = 0, depth = 0;
+    
+    try {
+      const [batRes, bleRes, depthRes] = await Promise.allSettled([
+        // 1. OTONOM TRİYAJ (Batarya Radarı)
+        (async () => {
+           if ('getBattery' in navigator) {
+             const battery: any = await (navigator as any).getBattery();
+             return Math.round(battery.level * 100);
+           }
+           return 100;
+        })(),
+        // 2. BLE KÜMELENME RADARI (2.5 sn Timeout)
+        (async () => {
+           let count = 0;
+           if ('bluetooth' in navigator && (navigator.bluetooth as any).requestLEScan) {
+              const scan = await (navigator.bluetooth as any).requestLEScan({ acceptAllAdvertisements: true }).catch(() => null);
+              if (scan) {
+                 return new Promise<number>((res) => {
+                    const bleListener = (event: any) => {
+                       // Log-Normal Gölgeleme Modeli: d = 10^((-59 - RSSI) / 30) (n=3 ref=-59)
+                       const distance = Math.pow(10, (-59 - event.rssi) / 30);
+                       if (distance < 10) count++;
+                    };
+                    navigator.bluetooth.addEventListener('advertisementreceived', bleListener);
+                    setTimeout(() => {
+                       navigator.bluetooth.removeEventListener('advertisementreceived', bleListener);
+                       if (scan.active !== false) scan.stop();
+                       res(Math.min(count, 255)); // 1 byte cap
+                    }, 2500);
+                 });
+              }
+           }
+           return 0;
+        })(),
+        // 3. Z-EKSENİ BAROMETRİK DERİNLİK (2.5 sn Timeout)
+        (async () => {
+           if ('Barometer' in window) {
+              return new Promise<number>((res) => {
+                 try {
+                    const BarometerKlass = (window as any).Barometer;
+                    const sensor = new BarometerKlass({ frequency: 1 });
+                    sensor.addEventListener('reading', () => {
+                       // Hipzometrik Eşitlik (Yaklaşık): h = 8.3 * (1013.25 - P)
+                       const h = Math.abs(8.3 * (1013.25 - sensor.pressure));
+                       sensor.stop();
+                       res(Math.min(Math.round(h), 255)); // 1 byte cap
+                    });
+                    sensor.addEventListener('error', () => res(0));
+                    sensor.start();
+                    setTimeout(() => { sensor.stop(); res(0); }, 2500);
+                 } catch (e) {
+                    res(0);
+                 }
+              });
+           }
+           return 0;
+        })()
+      ]);
+
+      if (batRes.status === 'fulfilled') bat = batRes.value;
+      if (bleRes.status === 'fulfilled') bleCount = bleRes.value;
+      if (depthRes.status === 'fulfilled') depth = depthRes.value;
+    } catch (metricError) {
+      console.warn("Metrik ölçüm hatası (Non-fatal)", metricError);
+    }
+    
     let activeSignalId = localStorage.getItem("active_signal_id");
     if (isEmergency && !activeSignalId) {
       activeSignalId = crypto.randomUUID();
@@ -224,7 +292,7 @@ export default function PanicButtonPage() {
     }
 
     const s = isEmergency ? 1 : 0; // 1: SOS (Kırmızı), 0: SAFE (Yeşil)
-    const payload = { id: activeSignalId, l: lat, g: lng, s, a: accuracy };
+    const payload = { id: activeSignalId, l: lat, g: lng, s, a: accuracy, b: bat, bc: bleCount, d: depth };
 
     const handleOfflineFallback = async () => {
       try {

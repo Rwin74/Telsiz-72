@@ -14,6 +14,9 @@ type Signal = {
   status: number;
   created_at: string;
   accuracy?: number;
+  battery?: number;
+  ble_count?: number;
+  depth?: number;
 };
 
 // HeatMap Layer Component
@@ -169,12 +172,26 @@ export default function CrisisMap({ signals, flyToProvince, geoJson, onProvinceS
                   }}
                 >
                   <Popup>
-                    <div className="flex flex-col gap-2 font-mono p-1">
+                    <div className="flex flex-col gap-2 font-mono p-1 min-w-[200px]">
                       <span className="text-xs font-bold text-slate-300">KOORD: {signal.lat.toFixed(5)}, {signal.lng.toFixed(5)}</span>
                       {signal.accuracy && signal.accuracy > 50 && (
                         <span className="text-xs font-bold text-red-400">⚠️ Hata Payı: ~{signal.accuracy}m</span>
                       )}
-                      <span className="text-xs text-slate-500">Zaman: {new Date(signal.created_at).toLocaleTimeString('tr-TR')}</span>
+                      
+                      {/* DONANIM METRİKLERİ */}
+                      <div className="telsiz-popup flex flex-col gap-1 border-t border-slate-700/50 pt-2 mt-1">
+                        <p className={`text-xs ${signal.battery !== undefined && signal.battery < 15 ? 'text-red-500 font-black animate-pulse' : 'text-emerald-400'}`}>
+                          🔋 Şarj: %{signal.battery !== undefined ? signal.battery : 'N/A'}{signal.battery !== undefined && signal.battery < 15 ? ' (KRİTİK)' : ' (NORMAL)'}
+                        </p>
+                        <p className="text-xs text-cyan-300">
+                          🫂 Kümelenme: {signal.ble_count !== undefined ? signal.ble_count : 0} Kişi Tespit
+                        </p>
+                        <p className="text-xs text-amber-300">
+                          📏 Tahmini Derinlik: {signal.depth !== undefined ? signal.depth : 0} Metre
+                        </p>
+                      </div>
+
+                      <span className="text-xs text-slate-500 border-t border-slate-700/50 pt-1">Zaman: {new Date(signal.created_at).toLocaleTimeString('tr-TR')}</span>
                       <button 
                       onClick={() => resolveCase(signal.id)} 
                       className="mt-2 w-full px-3 py-2 bg-slate-900 border border-slate-700 hover:bg-slate-800 text-cyan-400 hover:text-cyan-300 font-bold text-[11px] uppercase tracking-wider rounded transition-colors"
