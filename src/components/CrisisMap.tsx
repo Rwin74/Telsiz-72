@@ -102,6 +102,9 @@ export default function CrisisMap({ signals, flyToProvince, geoJson, onProvinceS
           border: 1px solid #374151;
           box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
         }
+        .leaflet-heatmap-layer {
+          pointer-events: none !important;
+        }
       `}</style>
       
       <MapContainer
@@ -145,6 +148,41 @@ export default function CrisisMap({ signals, flyToProvince, geoJson, onProvinceS
         <HeatmapLayer data={signals} />
 
         {signals.map((signal, idx) => {
+          const renderPopup = () => (
+            <Popup>
+              <div className="flex flex-col gap-2 font-mono p-1 min-w-[200px]">
+                <span className="text-xs font-bold text-slate-300">KOORD: {signal.lat.toFixed(5)}, {signal.lng.toFixed(5)}</span>
+                {signal.accuracy && signal.accuracy > 50 && (
+                  <span className="text-xs font-bold text-red-400">⚠️ Hata Payı: ~{signal.accuracy}m</span>
+                )}
+                
+                {/* DONANIM METRİKLERİ */}
+                <div className="telsiz-popup flex flex-col gap-1 border-t border-slate-700/50 pt-2 mt-1">
+                  <p className={`text-xs ${(signal.battery !== undefined && signal.battery !== null && signal.battery !== -1 && signal.battery < 15) ? 'text-red-500 font-black animate-pulse' : 'text-emerald-400'}`}>
+                    🔋 Şarj: {(signal.battery === undefined || signal.battery === null || signal.battery === -1) ? 'Sensör İzni Yok' : `%${signal.battery}${(signal.battery < 15) ? ' (KRİTİK)' : ' (NORMAL)'}`}
+                  </p>
+                  <p className="text-xs text-cyan-300">
+                    🫂 Kümelenme: {(signal.ble_count === undefined || signal.ble_count === null || signal.ble_count === -1) ? 'Mobil Uygulama Gerektirir' : `${signal.ble_count} Kişi Tespit`}
+                  </p>
+                  <p className="text-xs text-amber-300">
+                    📏 Tahmini Derinlik: {(signal.depth === undefined || signal.depth === null || signal.depth === -1) ? 'Mobil Uygulama Gerektirir' : `${signal.depth} Metre`}
+                  </p>
+                </div>
+
+                <span className="text-xs text-slate-500 border-t border-slate-700/50 pt-1">Zaman: {new Date(signal.created_at).toLocaleTimeString('tr-TR')}</span>
+                
+                {signal.status === 1 && (
+                  <button 
+                    onClick={() => resolveCase(signal.id)} 
+                    className="mt-2 w-full px-3 py-2 bg-slate-900 border border-slate-700 hover:bg-slate-800 text-cyan-400 hover:text-cyan-300 font-bold text-[11px] uppercase tracking-wider rounded transition-colors"
+                  >
+                    ✓ Ekipler Ulaştı / Vakayı Kapat
+                  </button>
+                )}
+              </div>
+            </Popup>
+          );
+
           if (signal.status === 1) { // KIRMIZI SOS
             return (
                <Fragment key={signal.id || idx}>
@@ -171,36 +209,8 @@ export default function CrisisMap({ signals, flyToProvince, geoJson, onProvinceS
                     weight: 10,
                   }}
                 >
-                  <Popup>
-                    <div className="flex flex-col gap-2 font-mono p-1 min-w-[200px]">
-                      <span className="text-xs font-bold text-slate-300">KOORD: {signal.lat.toFixed(5)}, {signal.lng.toFixed(5)}</span>
-                      {signal.accuracy && signal.accuracy > 50 && (
-                        <span className="text-xs font-bold text-red-400">⚠️ Hata Payı: ~{signal.accuracy}m</span>
-                      )}
-                      
-                      {/* DONANIM METRİKLERİ */}
-                      <div className="telsiz-popup flex flex-col gap-1 border-t border-slate-700/50 pt-2 mt-1">
-                        <p className={`text-xs ${(signal.battery !== undefined && signal.battery !== null && signal.battery !== -1 && signal.battery < 15) ? 'text-red-500 font-black animate-pulse' : 'text-emerald-400'}`}>
-                          🔋 Şarj: {(signal.battery === undefined || signal.battery === null || signal.battery === -1) ? 'Sensör İzni Yok' : `%${signal.battery}${(signal.battery < 15) ? ' (KRİTİK)' : ' (NORMAL)'}`}
-                        </p>
-                        <p className="text-xs text-cyan-300">
-                          🫂 Kümelenme: {(signal.ble_count === undefined || signal.ble_count === null || signal.ble_count === -1) ? 'Mobil Uygulama Gerektirir' : `${signal.ble_count} Kişi Tespit`}
-                        </p>
-                        <p className="text-xs text-amber-300">
-                          📏 Tahmini Derinlik: {(signal.depth === undefined || signal.depth === null || signal.depth === -1) ? 'Mobil Uygulama Gerektirir' : `${signal.depth} Metre`}
-                        </p>
-                      </div>
-
-                      <span className="text-xs text-slate-500 border-t border-slate-700/50 pt-1">Zaman: {new Date(signal.created_at).toLocaleTimeString('tr-TR')}</span>
-                      <button 
-                      onClick={() => resolveCase(signal.id)} 
-                      className="mt-2 w-full px-3 py-2 bg-slate-900 border border-slate-700 hover:bg-slate-800 text-cyan-400 hover:text-cyan-300 font-bold text-[11px] uppercase tracking-wider rounded transition-colors"
-                    >
-                      ✓ Ekipler Ulaştı / Vakayı Kapat
-                    </button>
-                  </div>
-                </Popup>
-              </CircleMarker>
+                  {renderPopup()}
+                </CircleMarker>
              </Fragment>
             )
           } else if (signal.status === 2) { // KAPANMIŞ / MÜDAHALE EDİLMİŞ
@@ -215,7 +225,9 @@ export default function CrisisMap({ signals, flyToProvince, geoJson, onProvinceS
                   color: "transparent",
                   weight: 0,
                 }}
-              />
+              >
+                {renderPopup()}
+              </CircleMarker>
             )
           } else { // YEŞİL GÜVENDE
             return (
@@ -229,7 +241,9 @@ export default function CrisisMap({ signals, flyToProvince, geoJson, onProvinceS
                   color: "transparent",
                   weight: 0,
                 }}
-              />
+              >
+                {renderPopup()}
+              </CircleMarker>
             )
           }
         })}

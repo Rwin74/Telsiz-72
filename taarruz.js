@@ -1,79 +1,44 @@
-// taarruz.js - Telsiz-72 ULUSAL KRİZ SİMÜLASYONU (TÜRKİYE GENELİ)
+// hayalet.js - Telsiz-72 YATIRIMCI SUNUMU (PSYOPS) OPERASYONU
 const crypto = require('crypto');
 
+// Senin taarruz.js içindeki gerçek API adresin
 const API_URL = "https://telsiz-72.vercel.app/api/sos";
 
-// TÜRKİYE COĞRAFİ SINIRLARI (Yaklaşık Kutu)
-const MIN_LAT = 36.0; // Güney (Hatay civarı)
-const MAX_LAT = 42.0; // Kuzey (Sinop civarı)
-const MIN_LNG = 26.0; // Batı (İzmir/Edirne civarı)
-const MAX_LNG = 45.0; // Doğu (Iğdır civarı)
+async function hayaletSinyaliAtesle() {
+    console.log("🚨 TELSİZ-72 KESKİN NİŞANCI OPERASYONU BAŞLIYOR... 🚨");
+    console.log("Hedef Kilitlendi: Bartın Merkez...");
 
-// DEVASA TEST AYARLARI
-const TOTAL_REQUESTS = 10000; // 10 BİN SİNYAL!
-const REQUESTS_PER_SECOND = 20; // Güvenli Sızma Hızı (Ban yememek için)
-
-let sentCount = 0;
-let successCount = 0;
-let failCount = 0;
-
-function generateMockPayload() {
-    // Türkiye sınırları içinde tamamen rastgele bir nokta üretir
-    const lat = MIN_LAT + Math.random() * (MAX_LAT - MIN_LAT);
-    const lng = MIN_LNG + Math.random() * (MAX_LNG - MIN_LNG);
-    
-    return {
-        id: crypto.randomUUID(),
-        l: parseFloat(lat.toFixed(5)),
-        g: parseFloat(lng.toFixed(5)),
-        s: 1,
-        a: 111 
+    // İNSANLARI ŞOK EDECEK O VERİ PAKETİ
+    const payload = {
+        id: crypto.randomUUID(), // Benzersiz bir kimlik fırlat
+        l: 41.6358,              // Bartın Enlem
+        g: 32.3375,              // Bartın Boylam
+        s: 3,                    // Şarj %3 (Zaman daralıyor hissi)
+        a: -18                   // TAHMİNİ DERİNLİK: -18 Metre! (Bodrum katının da altı)
     };
-}
 
-async function fireRequest() {
-    if (sentCount >= TOTAL_REQUESTS) return;
-    
-    sentCount++;
-    const payload = generateMockPayload();
-    
+    console.log(`📦 Gönderilen Paket: Derinlik ${payload.a}m, Şarj %${payload.s}`);
+
     try {
+        // Fetch API (Node 18+ ile dahili gelir)
         const response = await fetch(API_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
             body: JSON.stringify(payload)
         });
 
         if (response.ok) {
-            successCount++;
-            process.stdout.write(`\r🔥 TÜRKİYE GENELİ SIZMA: ${successCount}/${TOTAL_REQUESTS} | ❌ HATA: ${failCount} `);
+            console.log("✅ HEDEF VURULDU! Sinyal başarıyla Vercel'e ulaştı.");
+            console.log("🔥 Sunum Taktigi: Şimdi ekrana dön ve haritada beliren kırmızı pini göster!");
         } else {
-            failCount++;
+            console.log("❌ Sinyal başarısız oldu. Vercel şu kodu döndü:", response.status);
         }
     } catch (error) {
-        failCount++;
+        console.error("💥 Bağlantı Hatası. İnterneti kontrol et Komutan:", error.message);
     }
 }
 
-console.log(`🦅 ATAKAN KOMUTAN: ULUSAL KRİZ TATBİKATI BAŞLIYOR!`);
-console.log(`Hedef: TÜM TÜRKİYE HARİTASI (10.000 Sinyal)`);
-console.log(`Hız: Saniyede 20 Füze (Yaklaşık 8.5 Dakika sürecek)...`);
-console.log(`Lütfen Dashboard'u uzaklaştırın (Zoom Out) ve tüm ülkeyi ekrana alın!\n`);
-
-const intervalTime = 1000 / REQUESTS_PER_SECOND;
-
-const bombardment = setInterval(() => {
-    fireRequest();
-    
-    if (sentCount >= TOTAL_REQUESTS) {
-        clearInterval(bombardment);
-        
-        setTimeout(() => {
-            console.log(`\n\n🛑 ULUSAL SİMÜLASYON TAMAMLANDI!`);
-            console.log(`📊 Haritaya Çivilenen: ${successCount} Sinyal`);
-            console.log(`📉 Reddedilen: ${failCount}`);
-            console.log(`ZAFER SENİNDİR KOMUTAN! VİDEOYU ALMAYI UNUTMA!`);
-            process.exit(0);
-        }, 2000);
-    }
-}, intervalTime);
+// Operasyonu Başlat
+hayaletSinyaliAtesle();
