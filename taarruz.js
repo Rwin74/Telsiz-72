@@ -8,13 +8,15 @@ async function hayaletSinyaliAtesle() {
     console.log("🚨 TELSİZ-72 KESKİN NİŞANCI OPERASYONU BAŞLIYOR... 🚨");
     console.log("Hedef Kilitlendi: Bartın Merkez...");
 
-    // İNSANLARI ŞOK EDECEK O VERİ PAKETİ
+// İNSANLARI ŞOK EDECEK O VERİ PAKETİ
     const payload = {
-        id: crypto.randomUUID(), // Benzersiz bir kimlik fırlat
-        l: 41.6358,              // Bartın Enlem
-        g: 32.3375,              // Bartın Boylam
-        s: 3,                    // Şarj %3 (Zaman daralıyor hissi)
-        a: -18                   // TAHMİNİ DERİNLİK: -18 Metre! (Bodrum katının da altı)
+        id: crypto.randomUUID(), 
+        l: 41.6358,              
+        g: 32.3375,              
+        s: 3,                    
+        a: -18,
+        // BURASI ÇOK KRİTİK! Backend'in SOS olarak algılaması için gereken anahtar kelime:
+        status: "SOS" // Eğer ekibin başka bir kelime (örn: "CRITICAL") kullanıyorsa onu yaz.
     };
 
     console.log(`📦 Gönderilen Paket: Derinlik ${payload.a}m, Şarj %${payload.s}`);

@@ -44,6 +44,11 @@ const HeatmapLayer = ({ data }: { data: Signal[] }) => {
           maxZoom: 15,
           gradient: { 0.4: 'yellow', 0.6: 'orange', 1: 'red' }
         }).addTo(map);
+
+        // Force disable pointer events directly on the canvas to ensure it never blocks clicks
+        if (layerRef.current && layerRef.current._canvas) {
+          layerRef.current._canvas.style.pointerEvents = 'none';
+        }
       } catch (e) {
         // Fallback or ignore if plugin fails
       }
@@ -102,7 +107,7 @@ export default function CrisisMap({ signals, flyToProvince, geoJson, onProvinceS
           border: 1px solid #374151;
           box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
         }
-        .leaflet-heatmap-layer {
+        .leaflet-overlay-pane canvas {
           pointer-events: none !important;
         }
       `}</style>
